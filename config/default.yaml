@@ -1,0 +1,33 @@
+# Default pipeline configuration. Override with env vars or config/<env>.yaml.
+
+s3:
+  bucket: claude-mcp-object-store
+  prefix: raw/
+
+chunking:
+  tokenizer: cl100k_base
+  parent_max_tokens: 500
+  child_max_tokens: 150
+  child_min_tokens: 30
+  child_overlap_tokens: 50
+
+embedding:
+  provider: stub          # stub | voyage
+  model: voyage-4
+  dims: 1024
+  batch_size: 32
+  passage_prefix: "passage: "
+  query_prefix: "query: "
+
+opensearch:
+  endpoint: https://vpc-mcp-dev-os-search-eu-wpkqzgri7dpehi74tybzbnmx5u.eu-west-1.es.amazonaws.com
+  index: mcp-docs
+  bulk_batch_size: 256
+  knn:
+    m: 16
+    ef_construction: 100
+    space: cosinesimil
+
+logging:
+  level: INFO
+  json: true

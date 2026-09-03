@@ -1,0 +1,125 @@
+# Airtable attachment ingestion configuration.
+# Secrets are read from .env (AIRTABLE_PAT_TOKEN, S3_BUCKET, AWS_REGION).
+
+defaults:
+  metadata_local_dir: data/metadata/airtable
+  metadata_s3_prefix: metadata/airtable_schema
+  upload_schema_to_s3: true
+  request_timeout_seconds: 120
+  page_size: 100
+
+targets:
+  profiles_sync:
+    enabled: true
+    # Event-driven poller/worker watches CV + Bio attachment changes.
+    poll_enabled: true
+    database_id: app0ZvoNuWDMx4NeC
+    database_name: Profiles Sync (Claude)
+    table_id: tblCHqUZacTVV8WRb
+    table_name: Dalberg Profiles
+    identifier_column: Email
+    attachment_columns:
+      - CV Attachment
+      - Bio Attachment
+    text_columns: []
+    s3_prefix: raw
+    normalizer: null     # default fallback for any column not listed below
+    attachment_column_normalizers:
+      "CV Attachment": llm_cv    # table-format detection + Claude Haiku rewrite
+      "Bio Attachment": llm_bio  # always-process bio structuring via Claude Haiku
+
+  d_quals_sync:
+    enabled: true
+    # Opt-in to the event-driven poller/worker (scripts/run_poller.py,
+    # scripts/run_worker.py). Watches ALL THREE attachment_columns below
+    # (Deliverable Attachments, Insight, Proposal Attachment) — any change to
+    # any of them enqueues the record for re-ingestion + re-embedding.
+    poll_enabled: true
+    # Optional per-target format allowlist (lowercase or not — normalized at
+    # load). When omitted/empty, DEFAULT_ALLOWED_EXTENSIONS applies: everything
+    # the pipeline can extract today (.pdf .ppt .pptx .doc .docx .xlsx .xlsm
+    # .png .jpg .jpeg .webp .gif). Anything else is skipped BEFORE download.
+    # allowed_extensions: [".pdf", ".pptx"]
+    database_id: appjkd75GD2bUQxZe
+    database_name: D.Quals Sync (Claude)
+    table_id: tblXRuUMKk9fO1bE2
+    table_name: (D.Quals)
+    identifier_column: Project Number  # primary field; use ID if you prefer numeric keys
+    attachment_columns:
+      - Deliverable Attachments        # PPT/PDF
+      - Insight                        # PPT/PDF
+      - Proposal Attachment            # PPT/PDF
+    text_columns: []
+    # Pushed into each deck's normalized.txt front-matter → structured metadata
+    # + co-embedded for search (NOT uploaded as a standalone document).
+    metadata_columns:
+      - Project Description (1-paragraph)
+    # Structured, filterable facets (keyword/date fields in OpenSearch) — enables
+    # filtered-KNN like "Practice Area = Financial Services AND Project Region = East Africa".
+    facet_columns:
+      - Client Organisation
+      - Practice Area
+      - Project Region
+      - Project Location
+      - Dalberg Entity
+      - Insight Type
+      - Start Date
+      - End Date
+      - Confidential Project
+      - Confidential Client
+    s3_prefix: raw
+    process_images: true
+    normalizer: null
+    attachment_column_normalizers:
+      "Deliverable Attachments": slides_deck   # tiered: pptx parser → Haiku image escalation
+      "Insight": slides_deck
+      "Proposal Attachment": slides_deck
+
+  proposal_library_sync:
+    enabled: false
+    database_id: appfv7liz4PHBlvsA
+    database_name: Proposal Library Sync (Claude)
+    table_id: ""
+    table_name: Proposal Library
+    identifier_column: Email
+    attachment_columns: []
+    text_columns: []
+    s3_prefix: raw
+    normalizer: null
+
+  knowledge_library_sync:
+    enabled: true
+    # Event-driven poller/worker watches Attachments changes.
+    poll_enabled: true
+    database_id: appABMXsYVtA1FCU8
+    database_name: Knowledge Library Sync (Claude)
+    table_id: "tbl1tM51QgyoYj9Gy"
+    table_name: Knowledge Library
+    identifier_column: Name
+    attachment_columns:
+      - Attachments
+    text_columns: []
+    # Co-embedded in each file's normalized.txt header (not a standalone doc).
+    metadata_columns:
+      - Description
+    # Structured, filterable facets (keyword/date fields in OpenSearch) — same
+    # mechanism as d_quals; enables filtered-KNN by practice area, region, type, etc.
+    facet_columns:
+      - Practice Area
+      - KD Type
+      - Country/Region
+      - Author
+      - Team
+      - Item Type
+      - Client
+      - Language
+      - Insight Type
+      - Date of Publication
+      - Can be shared externally?
+    s3_prefix: raw
+    process_images: true
+    # Decks render+enrich; PDFs/DOCX/XLSX delegate inside slides_deck. (Batch path
+    # handles all types by extension regardless; this gives the SYNC path parity.)
+    normalizer: null
+    attachment_column_normalizers:
+      "Attachments": slides_deck

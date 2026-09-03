@@ -1,0 +1,102 @@
+# Table -> S3 mapping and per-table chunking overrides.
+#
+# Adding a new table is config-only:
+#   1. Add an entry under `tables`.
+#   2. Set its `s3_prefix` (the bucket prefix it lives under).
+#   3. Optionally override chunking parameters, supported extensions, or the
+#      `chunker_strategy` (registered name; see `chunker/registry.py`).
+# No code change is required.
+#
+# The chunking pipeline only consumes plain text. The upstream ingestion
+# pipeline is responsible for converting PDF / DOCX / PPTX / etc. into
+# ``.txt`` files at ``raw/{table_name}/{primary_key}/{column_name}.txt``.
+
+default:
+  chunking:
+    tokenizer: cl100k_base
+    parent_max_tokens: 800
+    parent_overlap_tokens: 100
+    child_max_tokens: 200
+    child_min_tokens: 30
+    child_overlap_tokens: 50
+  supported_extensions:
+    - .txt
+  chunker_strategy: parent_child
+
+tables:
+  # ── Active tables ────────────────────────────────────────────────────────
+  #
+  # IMPORTANT: the `s3_prefix` must match the slug produced by
+  # `slugify_table_name(airtable_ingestion.yaml → table_name)`.
+  # e.g. "Dalberg Profiles" → "dalberg_profiles" → raw/dalberg_profiles/
+
+  dalberg_profiles:
+    s3_prefix: raw/dalberg_profiles/
+    index_name: mcp-dalberg-profiles
+    description: "Dalberg employee profiles — CVs and bios (Airtable: Dalberg Profiles)."
+    chunker_strategy: resume
+    chunking:
+      parent_max_tokens: 1500    # was 1200 — keeps large Experience sections intact
+      child_max_tokens: 350      # was 250 — prevents mid-entry splits for verbose roles
+      child_min_tokens: 20
+      child_overlap_tokens: 50
+    supported_extensions:
+      - .txt
+      - .pdf
+      - .docx
+
+  # ── Disabled / future tables ─────────────────────────────────────────────
+  # Stubs kept in sync with airtable_ingestion.yaml so enabling a target
+  # there requires only setting `enabled: true` — no code changes here.
+
+  d_quals:
+    # NOTE: must match where ingestion writes — slugify_table_name("(D.Quals)")
+    # produces the DOTTED slug "d.quals", so files live under raw/d.quals/.
+    s3_prefix: raw/d.quals/
+    index_name: mcp-d-quals
+    description: "D.Quals credentials and qualification data — proposal/deliverable decks."
+    chunker_strategy: pptx_slide        # decks normalized to '## Slide N' markdown
+    chunking:
+      parent_max_tokens: 1000
+      parent_overlap_tokens: 100
+      child_max_tokens: 250
+      child_min_tokens: 30
+      child_overlap_tokens: 50
+    # EMBEDDING reads ONLY the normalized output (.txt) — each file's
+    # ``*__normalized.txt`` and the record's ``__record_summary.txt``. The raw
+    # binaries (pdf/pptx/docx/xlsx) are inputs to NORMALIZATION (configured in
+    # airtable_ingestion.yaml), never embedded directly — embedding a raw parse
+    # would bypass the LLM reconciliation, slide structure, summaries and facets.
+    supported_extensions:
+      - .txt
+
+  proposal_library:
+    s3_prefix: raw/proposal_library/
+    index_name: mcp-proposal-library
+    description: "Dalberg proposal library documents."
+    chunker_strategy: parent_child
+    chunking:
+      parent_max_tokens: 1000
+      child_max_tokens: 250
+      child_overlap_tokens: 50
+    supported_extensions:
+      - .txt
+      - .pdf
+      - .docx
+
+  knowledge_library:
+    s3_prefix: raw/knowledge_library/
+    index_name: mcp-knowledge-library
+    description: "Dalberg knowledge library — research briefs, strategy decks, presentations."
+    chunker_strategy: pptx_slide
+    chunking:
+      parent_max_tokens: 1000
+      parent_overlap_tokens: 100
+      child_max_tokens: 250
+      child_min_tokens: 30
+      child_overlap_tokens: 50
+    # EMBEDDING reads ONLY normalized output (.txt) — *__normalized.txt and
+    # __record_summary.txt. Raw binaries are inputs to normalization, never embedded.
+    supported_extensions:
+      - .txt
+

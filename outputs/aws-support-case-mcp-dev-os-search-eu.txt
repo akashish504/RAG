@@ -1,0 +1,240 @@
+================================================================================
+AWS SUPPORT CASE — DIAGNOSTIC EVIDENCE
+Domain:      mcp-dev-os-search-eu  (Amazon OpenSearch Service)
+Region:      eu-west-1
+Account:     345568587892
+Engine:      OpenSearch_3.5
+Change ID:   0efbbce2-d37c-45cb-8fd7-7fab7ea7bb22
+Prepared:    2026-07-22 ~11:15 UTC
+================================================================================
+
+SUMMARY
+-------
+A customer-initiated instance-type change (t3.medium.search -> r7g.4xlarge.search,
+started 06:44 UTC) has completed 4 of 5 blue/green stages but has been stuck at
+"Deleting older resources" for hours. Root cause (evidence below): the OLD
+t3.medium node is still the elected cluster manager and is CPU-starved by a
+long-running Lucene segment merge rebuilding an HNSW vector graph (running 24+
+hours, burstable CPU credits exhausted). The cluster-manager service has not
+processed any cluster-state update for ~4 hours: 85 tasks are queued, including
+one at IMMEDIATE priority and 83 repeated add-voting-config-exclusions attempts
+from the AWS decommissioning workflow. All customer metadata operations (index
+creation, settings updates, further config changes) are blocked. Search/data
+plane still works; all shards are green and fully allocated on the NEW node.
+
+REQUESTED ACTION
+----------------
+Force cluster-manager failover to the new node (e4f225d03a54c9783de70fcaa98f26b4)
+or forcibly complete the environment swap and detach the old node
+(fc62a89c0ef38d5859650db9c3d02217). The old node holds no allocated shards;
+all data is green on the new node.
+
+TIMELINE (UTC, 2026-07-22)
+--------------------------
+06:44:23  UpdateDomainConfig submitted (InstanceType r7g.4xlarge.search)
+06:44:43  Stage "Validation"                 COMPLETED
+06:54:47  Stage "Provisioning new nodes"     COMPLETED
+06:59:50  Stage "Creating a new environment" COMPLETED
+10:14:03  Stage "Copying shards to new nodes" COMPLETED
+   --     Stage "Deleting older resources"   PENDING (still pending at 11:15)
+~07:11    Oldest stuck cluster-state task queued (shard-started, URGENT, 4h wait
+          as of 11:11)
+11:03     DomainStatus shows Processing:false but ConfigChangeStatus:ApplyingChanges
+11:07     Customer indices.create request times out (30s client timeout);
+          the create task never appears in the pending-tasks queue
+11:07     UpdateDomainConfig (EBS gp3 Iops/Throughput) rejected:
+          "A change/update is in progress."
+
+--------------------------------------------------------------------------------
+EVIDENCE 1 — describe-domain-change-progress (11:0x UTC)
+--------------------------------------------------------------------------------
+{
+    "ChangeProgressStatus": {
+        "ChangeId": "0efbbce2-d37c-45cb-8fd7-7fab7ea7bb22",
+        "StartTime": "2026-07-22T06:44:23.215000+00:00",
+        "Status": "PROCESSING",
+        "PendingProperties": [
+            "ClusterConfig.InstanceType : {\"InstanceType\":\"r7g.4xlarge.search\"}",
+            "ClusterConfig.NodeOptions.Coordinator : {\"Enabled\":false}"
+        ],
+        "CompletedProperties": [],
+        "TotalNumberOfStages": 5,
+        "ChangeProgressStages": [
+            { "Name": "Validation", "Status": "COMPLETED",
+              "LastUpdated": "2026-07-22T06:44:43.828000+00:00" },
+            { "Name": "Creating a new environment", "Status": "COMPLETED",
+              "LastUpdated": "2026-07-22T06:59:50.761000+00:00" },
+            { "Name": "Provisioning new nodes", "Status": "COMPLETED",
+              "LastUpdated": "2026-07-22T06:54:47.145000+00:00" },
+            { "Name": "Copying shards to new nodes", "Status": "COMPLETED",
+              "Description": "Shard movement complete.",
+              "LastUpdated": "2026-07-22T10:14:03.862000+00:00" },
+            { "Name": "Deleting older resources", "Status": "PENDING",
+              "Description": "Deleting resources associated with the old environment." }
+        ],
+        "LastUpdatedTime": "2026-07-22T10:14:03.871000+00:00",
+        "ConfigChangeStatus": "ApplyingChanges",
+        "InitiatedBy": "CUSTOMER"
+    }
+}
+
+--------------------------------------------------------------------------------
+EVIDENCE 2 — cluster state: both environments still attached (11:03 UTC)
+--------------------------------------------------------------------------------
+GET _cat/nodes  (h=name,cpu,load_1m,heap.percent,heap.max,ram.max,merges.current)
+
+name                             cpu load_1m heap.percent heap.max ram.max merges.current
+fc62a89c0ef38d5859650db9c3d02217  70    3.86           79      2gb   3.7gb              0   <-- OLD t3.medium, still attached, still cluster manager
+e4f225d03a54c9783de70fcaa98f26b4   0    0.06           32   30.5gb 123.5gb              0   <-- NEW r7g.4xlarge, holds all data, idle
+
+GET _cat/allocation
+
+shards disk.indices disk.used disk.avail disk.total disk.percent node
+     0           0b    16.7gb     32.2gb       49gb           34 fc62a89c0ef38d5859650db9c3d02217
+    16       10.7gb    10.7gb     38.2gb       49gb           21 e4f225d03a54c9783de70fcaa98f26b4
+
+GET _cat/health
+
+cluster                           status node.total node.data shards pri relo init unassign pending_tasks max_task_wait_time active_shards_percent
+345568587892:mcp-dev-os-search-eu green           2         2     16  16    1    0        0            86               3.8h                100.0%
+
+Note: status green, all 16 shards on the new node, 1 shard stuck in relocation
+handoff, 86 pending cluster-state tasks with max wait 3.8h (at 11:03).
+
+--------------------------------------------------------------------------------
+EVIDENCE 3 — cluster-manager task queue frozen (11:11 UTC)
+--------------------------------------------------------------------------------
+GET _cluster/pending_tasks   (85 tasks; grouped)
+
+  83 x  add-voting-config-exclusions            <-- AWS decommissioning workflow retries
+   1 x  shard-started StartedShardEntry{shardId [[mcp-d-quals][0]], allocation...
+   1 x  cluster_update_settings
+
+Head of queue (priority | time_in_queue | source):
+
+    URGENT | 4h    | shard-started StartedShardEntry{shardId [[mcp-d-quals][0]], allocationId [HfkvKeL2SDyEvcd_...
+ IMMEDIATE | 15.2s | cluster_update_settings
+    URGENT | 4h    | add-voting-config-exclusions
+    URGENT | 3.9h  | add-voting-config-exclusions
+    URGENT | 3.6h  | add-voting-config-exclusions
+    URGENT | 3.6h  | add-voting-config-exclusions
+    URGENT | 3.5h  | add-voting-config-exclusions
+    (... 78 more add-voting-config-exclusions, 3.3h-3.5h ...)
+
+Interpretation: even IMMEDIATE-priority tasks are not being processed. The
+cluster-manager task thread is starved, not merely backlogged. The shard-started
+acknowledgment for [mcp-d-quals][0] (the relocation handoff) has waited 4 hours.
+
+--------------------------------------------------------------------------------
+EVIDENCE 4 — hot threads on the elected cluster manager (11:13:25 UTC)
+--------------------------------------------------------------------------------
+GET _nodes/_cluster_manager/hot_threads
+
+::: {fc62a89c0ef38d5859650db9c3d02217}{bD3W9ulvQwavgQZvLuU0cg}{OUEEhTxKS0Wa-5qy1hfJvw}
+    {x.x.x.x}{x.x.x.x:9300}{dimr}{... zone=eu-west-1a ...}
+   Hot threads at 2026-07-22T11:13:25.567Z, interval=500ms, busiestThreads=3:
+
+    4.0% cpu usage by thread
+    'opensearch[fc62a89c0ef38d5859650db9c3d02217][[mcp-d-quals][0]: Lucene Merge Thread #291]'
+     9/10 snapshots sharing following elements:
+       org.apache.lucene.internal.vectorization.MemorySegmentBulkVectorOps$Cosine.cosineBulkImpl
+       org.apache.lucene.internal.vectorization.MemorySegmentBulkVectorOps$Cosine.cosineBulk
+       org.apache.lucene.internal.vectorization.Lucene99MemorySegmentFloatVectorScorerSupplier$CosineSupplier$1.vectorOp
+       org.apache.lucene.internal.vectorization.Lucene99MemorySegmentFloatVectorScorerSupplier$AbstractBulkScorer.bulkScore
+       org.apache.lucene.util.hnsw.HnswGraphSearcher.searchLevel
+       org.apache.lucene.util.hnsw.HnswGraphBuilder.addGraphNodeInternal
+       org.apache.lucene.util.hnsw.HnswGraphBuilder.addGraphNode
+       org.apache.lucene.util.hnsw.MergingHnswGraphBuilder.build
+       org.apache.lucene.util.hnsw.IncrementalHnswGraphMerger.merge
+       org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsWriter.mergeOneField
+       org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat$FieldsWriter.mergeOneField
+       org.apache.lucene.codecs.KnnVectorsWriter.merge
+       org.apache.lucene.index.SegmentMerger.mergeVectorValues
+       org.apache.lucene.index.SegmentMerger.mergeWithLogging
+       org.apache.lucene.index.SegmentMerger.merge
+       org.apache.lucene.index.IndexWriter.mergeMiddle
+       org.apache.lucene.index.IndexWriter.merge
+       org.apache.lucene.index.ConcurrentMergeScheduler.doMerge
+       org.opensearch.index.engine.OpenSearchConcurrentMergeScheduler.doMerge
+       org.apache.lucene.index.ConcurrentMergeScheduler$MergeThread.run
+
+Interpretation:
+- The elected cluster manager is the OLD t3.medium node (fc62a89c...).
+- Its busiest thread is a Lucene segment merge on [mcp-d-quals][0] rebuilding an
+  HNSW k-NN vector graph (1.29M x 1024-dim float32 vectors). This merge stems
+  from a customer force-merge issued 2026-07-21 and has been running 24+ hours.
+- The node is a burstable t3.medium; behavior is consistent with exhausted CPU
+  credits (~0.4 effective vCPU) - verifiable via CloudWatch AWS/ES
+  CPUCreditBalance for this domain. Note the hot-threads sample totals only
+  ~4% CPU across the JVM's busiest threads - the whole process is receiving
+  almost no CPU time.
+- Consequence: the cluster-manager service thread is starved. It has processed
+  no cluster-state updates for ~4 hours, so the shard-relocation handoff and
+  the voting-config exclusions required to decommission this node never apply.
+  The blue/green deployment is deadlocked on the node it is trying to remove.
+
+--------------------------------------------------------------------------------
+EVIDENCE 5 — customer-side impact
+--------------------------------------------------------------------------------
+1) indices.create (PUT /mcp-d-quals-v2) at 11:07 UTC: client read timeout after
+   30s; task never appears in _cluster/pending_tasks. Index metadata operations
+   are effectively unavailable.
+2) UpdateDomainConfig (gp3 Iops 3000->6000, Throughput 125->250) at ~11:07 UTC:
+   rejected with ValidationException "A change/update is in progress. Please
+   wait for it to complete before requesting another change."
+3) The domain is billing at r7g.4xlarge.search rates while stuck; the customer
+   plan is a temporary scale-up for a one-time reindex followed by same-day
+   scale-down to t3.medium.search. Every hour of stall is direct cost.
+
+DATA SAFETY
+-----------
+Cluster health is GREEN. All 16 primary shards (10.7 GB) are allocated on the
+new node. No writes are failing. This case is about control-plane availability
+and completing the stuck deployment, not data recovery.
+
+INDEX INVOLVED
+--------------
+mcp-d-quals: 1 primary shard, 0 replicas, 2,052,432 docs, 8.7 GB store.
+Contains a 1024-dim knn_vector field (Lucene engine HNSW, ~1.29M vectors),
+which is why its segment merges are extremely CPU-intensive relative to the
+t3.medium's throttled baseline.
+
+CONTACT
+-------
+Requested resolution: force cluster-manager failover to the healthy new node
+or forcibly complete/finalize the blue/green swap and detach the old node.
+Happy to provide live re-captures of any of the above on request.
+
+================================================================================
+ADDENDUM — 2026-07-23 ~06:45 UTC (situation update)
+================================================================================
+The cluster-side deadlock SELF-RESOLVED during the day on 2026-07-22: the
+long-running Lucene merge on the old node completed, after which the cluster
+manager drained its entire pending-task backlog (85 -> 0). Current state:
+
+  - Cluster GREEN, 0 pending tasks, 0 relocations, no running tasks/merges.
+  - All data (24 shards) allocated on the new node (e4f225d0..., r7g.4xlarge).
+  - The OLD node (fc62a89c..., t3.medium) is STILL ATTACHED ~19+ hours after
+    "Copying shards to new nodes" completed (2026-07-22 10:14 UTC). The
+    "Deleting older resources" stage never completed. It appears the
+    decommissioning automation exhausted its retries during the task-queue
+    freeze (the 83 failed add-voting-config-exclusions attempts documented
+    above) and has not re-attempted since the queue recovered.
+  - Customer impact now: UpdateDomainConfig is still rejected ("A change/update
+    is in progress"), which blocks our planned scale-down to t3.medium.search.
+    The domain continues to bill at r7g.4xlarge rates for a completed migration.
+
+REVISED REQUESTED ACTION: complete (or resume) the stuck change
+0efbbce2-d37c-45cb-8fd7-7fab7ea7bb22 — i.e. detach/delete the old environment
+node — so the domain accepts configuration changes again. No cluster-side
+recovery is needed anymore; the cluster is healthy and all data is on the new
+environment.
+
+Additional datapoints (2026-07-23):
+- describe-domain-change-progress: LastUpdated = 2026-07-22T14:06:26Z — the
+  workflow has made no progress in 16+ hours; stage 5 remains PENDING.
+- CancelDomainConfigChange --dry-run: rejected with ValidationException
+  ("only allowed when domain's config change status is in ValidationFailed...");
+  current status is ApplyingChanges, so the customer has NO self-service path —
+  neither completing, cancelling, nor superseding the change is possible.
+================================================================================

@@ -1,0 +1,47 @@
+# Profile
+
+Senior software engineer with 8 years of experience building data and ML
+platforms. Focus on retrieval, search, and developer infrastructure.
+
+# Skills
+
+Python, SQL, Go, AWS, OpenSearch, Postgres, Kubernetes, Terraform.
+
+# Experience
+
+Senior Engineer | Acme Corp | Jan 2020 – Present
+San Francisco, CA
+- Led design of the company-wide search platform on OpenSearch.
+- Built parent-child chunking pipeline that reduced retrieval latency by 40%.
+- Mentored 5 engineers and ran the platform on-call rotation.
+
+Software Engineer | Beta Inc | Jun 2017 – Dec 2019
+Remote
+- Developed the data ingestion pipeline serving 12 internal teams.
+- Improved CI/CD pipeline runtime from 25 minutes to 9 minutes.
+- Owned the incident response runbook for the data platform.
+
+Software Engineer Intern | Gamma Labs | Jun 2016 – Aug 2016
+Boston, MA
+- Prototyped a feature flag service used in production for two years.
+
+# Education
+
+PhD, Computer Science | Stanford University | 2012 – 2017
+Thesis on distributed retrieval systems.
+
+BS, Computer Science | UC Berkeley | 2008 – 2012
+Graduated with honors.
+
+# Projects
+
+Open-source RAG toolkit | 2023
+- Released a permissive-licensed library for parent-child retrieval.
+- 1.2k GitHub stars and 30 external contributors.
+
+Real-time analytics demo | 2021
+- Streaming ETL prototype showcased at a regional meetup.
+
+# Certifications
+
+AWS Certified Solutions Architect – Associate, 2022

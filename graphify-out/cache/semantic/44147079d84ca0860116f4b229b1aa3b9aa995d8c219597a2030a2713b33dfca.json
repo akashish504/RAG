@@ -1,0 +1,1 @@
+{"nodes": [{"id": "normalizers_slugify_paths", "label": "Airtable-S3 path normalizers", "file_type": "code", "source_file": "src/pipeline/airtable_ingestion/normalizers.py", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

@@ -1,0 +1,150 @@
+# Per-source unified retrieval configuration.
+#
+# Each top-level key under `sources:` is a logical source bundling its
+# Airtable view (structured rows) and its OpenSearch view (embedded chunks).
+# Adding a new logical source is YAML-only.
+#
+# Environment expansion: ${VAR_NAME} is substituted from process env at
+# `SourceRegistry.load()` time. Required vars must be set; missing vars raise.
+#
+# Mirrors the table list in `config/tables.yaml` so writer (indexer) and
+# reader (retriever) agree on what a "source" is.
+
+defaults:
+  embedding:
+    provider: voyage
+    model: voyage-4
+    dims: 1024
+    query_prefix: "query: "
+    batch_size: 32
+  ranking:
+    fusion: rrf
+    rrf_k: 60
+    reranker_enabled: true
+    reranker_model: rerank-2.5
+  search_mode: hybrid             # hybrid | semantic_only | airtable_only
+  top_k: 10
+  airtable:
+    long_text_truncate: 800       # characters; long-text rows truncated + hinted
+
+sources:
+  dalberg_profiles:
+    display_name: "Dalberg Profiles"
+    enabled: true
+    description: >-
+      Dalberg employee profiles — the PERSON / people source (CVs, bios,
+      staffing). Use this for any question about a person: who they are, what
+      they know, where they sit, who can staff something. Key structured fields:
+      Display Name and Email (identity); Job Title (seniority; an "(External)"
+      prefix marks non-core staff); Areas of Expertise, Practice Areas and Skills
+      (what they work on — search all three); Office Location and Office Region
+      (where they sit) vs Countries of Expertise (where they have worked — keep
+      the two geographies distinct); Language (languages spoken; note the field
+      name is singular); University (education); Bio Attachment and CV Attachment
+      (the real bio/CV text lives in these attachments, not in text fields).
+      Routing: a query about a person → here; a query about a project, client, or
+      qual → D.Quals; a query spanning both (e.g. "what did X work on") → both.
+    chunking_strategy: resume
+    identifier_field: "Email"
+    airtable:
+      base_id: ${BASE_ID}
+      table_name: "Dalberg Profiles"
+      schema_snapshot_path: config/dalberg_profiles_schema.json
+      long_text_fields: []        # auto-detected from snapshot if empty
+    opensearch:
+      index_name: mcp-dalberg-profiles
+      k: 10
+      over_fetch_k: 50    # candidates per method; person-dedup then truncates to k
+      search_mode: hybrid
+
+  d_quals:
+    display_name: "D.Quals (Project Qualifications)"
+    enabled: true                        # index populated — D.Quals search live
+    description: >-
+      Dalberg project qualification documents (D.Quals) — records of DELIVERED client
+      engagements (credentials): full deliverables and insight decks from completed work.
+      Covers all practice areas (financial inclusion, health, agriculture, climate,
+      education, private sector development) and all geographies (Africa, Asia, Latin
+      America, global). Use this source to find past project work, methodologies, sector
+      experience, client names, financing structures, country-level findings, project
+      leadership (Dalberg Contact Person / PD), and project outcomes. Best source for
+      questions about what Dalberg has done for specific clients, in specific countries,
+      on specific topics. Company convention: on a project, "Project Director" / "PD"
+      means the person(s) named in the Dalberg Contact Person field (a linked field that
+      may list multiple people) — treat any "PD" / "Project Director" question as a lookup
+      on that field. NOTE on engagement status: an attachment column or S3/folder path
+      (e.g. a "proposal" attachment) is STORAGE PROVENANCE, not engagement outcome — never
+      infer won/lost or proposal-vs-delivered from it. Judge delivery from CONTENT: End
+      Date in the past = delivered; Results and Impact / Project Description describe the
+      actual engagement.
+    chunking_strategy: pptx_slide
+    identifier_field: "Project Number"    # must match ingestion identifier_column
+    airtable:
+      base_id: appjkd75GD2bUQxZe
+      table_name: "(D.Quals)"
+      schema_snapshot_path: config/d_quals_schema.json
+      long_text_fields: []
+    opensearch:
+      # v2 = faiss 8x on-disk quantized (spec 006). Rollback: point back at
+      # mcp-d-quals (kept closed, not deleted). 16x candidate: mcp-d-quals-16x.
+      index_name: mcp-d-quals-v2
+      k: 10
+      # Deeper candidate pool so off-tag semantic near-misses (vocabulary gaps,
+      # e.g. "competency-skills matrix" for a "leadership" query) reach the
+      # cross-encoder reranker, which is the right tool to close that gap.
+      over_fetch_k: 100
+      search_mode: hybrid
+      facet_filtering: true            # NL query → structured facet filters (grounded in index)
+      facet_mode: fallback             # hard first; widen to facet boosts when < min results (spec 007)
+      facet_fallback_min_results: 3
+
+  proposal_library:
+    display_name: "Proposal Library"
+    enabled: true
+    description: >-
+      Dalberg proposal library — full proposal documents and sections submitted to clients.
+      Covers Client, Practice Area, Area of Work, Project Type, Country, Region, Status,
+      Language, and Date as structured fields. Use this source to find which proposals
+      Dalberg has submitted, to which clients, in which countries or sectors, and what
+      approach/methodology was proposed. Best source for questions about past proposal
+      submissions by client name, country, practice area, or project type.
+    chunking_strategy: pptx_slide
+    identifier_field: "ID"
+    airtable:
+      # Proposal Library lives in its OWN Airtable base, not the profiles base.
+      base_id: appfv7liz4PHBlvsA
+      table_name: "Proposal Library"
+      schema_snapshot_path: config/proposal_library_schema.json
+      long_text_fields: []
+    opensearch:
+      index_name: mcp-proposal-library
+      k: 10
+      search_mode: hybrid
+      facet_filtering: true            # NL query → structured facet filters (grounded in index)
+      facet_mode: fallback             # hard first; widen to facet boosts when < min results (spec 007)
+      facet_fallback_min_results: 3
+
+  knowledge_library:
+    display_name: "Knowledge Library"
+    enabled: true
+    description: >-
+      Dalberg knowledge library documents (research, briefs, frameworks). Covers
+      Practice Area, KD Type, Country/Region, Author, Team, Item Type, and Language as
+      structured fields. Use this source to find Dalberg research, strategy frameworks,
+      and insight decks by topic, practice area, or geography.
+    chunking_strategy: pptx_slide        # decks/PDFs normalized to '## Slide N' markdown
+    identifier_field: "Name"
+    airtable:
+      # Knowledge Library lives in its OWN Airtable base, not the profiles base.
+      base_id: appABMXsYVtA1FCU8
+      table_name: "Knowledge Library"
+      schema_snapshot_path: config/knowledge_library_schema.json
+      long_text_fields: []
+    opensearch:
+      index_name: mcp-knowledge-library
+      k: 10
+      over_fetch_k: 50
+      search_mode: hybrid
+      facet_filtering: true            # NL query → structured facet filters (grounded in index)
+      facet_mode: fallback             # hard first; widen to facet boosts when < min results (spec 007)
+      facet_fallback_min_results: 3

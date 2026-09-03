@@ -1,0 +1,54 @@
+# CloudWatch Logs override — EC2 only.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cloudwatch.yml up -d
+#
+# Kept out of docker-compose.yml on purpose: the awslogs driver ships logs
+# from the Docker DAEMON, which must hold AWS credentials (the EC2 instance
+# role). On a laptop without that role every `docker compose up` would fail,
+# so local dev keeps the default json-file driver via the base file.
+# reset_deployment.sh includes this file automatically when it exists
+# (opt out with MCP_CLOUDWATCH_LOGS=0).
+#
+# The instance role needs: logs:CreateLogGroup, logs:CreateLogStream,
+# logs:PutLogEvents. For KMS-encrypted groups, pre-create them (encryption
+# cannot be attached to awslogs-create-group'd groups) — then
+# awslogs-create-group is a no-op.
+#
+# mode: non-blocking + buffer so a CloudWatch outage or IAM misconfig can
+# drop log lines instead of wedging the containers.
+
+x-awslogs: &awslogs
+  driver: awslogs
+  options: &awslogs-options
+    awslogs-region: ${AWS_REGION:-eu-west-1}
+    awslogs-create-group: "true"
+    mode: non-blocking
+    max-buffer-size: 4m
+
+services:
+  api:
+    logging:
+      <<: *awslogs
+      options:
+        <<: *awslogs-options
+        awslogs-group: /mcp-dev/api
+
+  worker:
+    logging:
+      <<: *awslogs
+      options:
+        <<: *awslogs-options
+        awslogs-group: /mcp-dev/worker
+    environment:
+      MCP_ENV: prod
+      LOG_LEVEL: INFO
+
+  pipeline:
+    logging:
+      <<: *awslogs
+      options:
+        <<: *awslogs-options
+        awslogs-group: /mcp-dev/pipeline
+    environment:
+      MCP_ENV: prod
+      LOG_LEVEL: INFO

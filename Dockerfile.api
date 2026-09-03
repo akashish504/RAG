@@ -1,0 +1,36 @@
+# Production API image: Nginx (port 80) -> Uvicorn/FastAPI (127.0.0.1:8000).
+# Build:  docker build -f Dockerfile.api -t dalberg-mcp-api:latest .
+# Run:    docker run --rm -p 80:80 -e API_BEARER_TOKEN='your-secret' dalberg-mcp-api:latest
+#
+# On EC2, open security group ingress TCP 80 (or map host:container as needed).
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY config ./config
+
+# voyage: query embeddings + reranker (semantic_search / hybrid retrieval)
+ARG PIP_EXTRAS="api,parsers,airtable_ingestion,voyage"
+
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -e ".[${PIP_EXTRAS}]"
+
+COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY docker/entrypoint-api.sh /entrypoint-api.sh
+RUN chmod +x /entrypoint-api.sh
+
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint-api.sh"]

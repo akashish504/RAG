@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dalberg-mcp"
+version = "0.1.0"
+description = "Dalberg MCP — embedding pipeline (S3 → chunk → embed → OpenSearch)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.34",
+    "opensearch-py>=2.6",
+    "tiktoken>=0.7",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "structlog>=24.1",
+    "tqdm>=4.66",
+    "tenacity>=8.2",
+]
+
+[project.optional-dependencies]
+voyage = ["voyageai>=0.2.3"]
+parsers = [
+    "pdfplumber>=0.11",
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "pymupdf>=1.24",
+    "openpyxl>=3.1",
+]
+airtable_ingestion = [
+    "pyairtable>=2.3",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "pypdf>=4.0",
+    "anthropic>=0.45",
+]
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    # <2: mcp 2.x removed mcp.server.fastmcp (import in retrieval/mcp/server.py)
+    # and broke the API on an unpinned rebuild (2026-07-28 outage).
+    "mcp>=1.6,<2",
+    "python-dotenv>=1.0",
+    "pyairtable>=2.3",
+    "requests>=2.31",
+    "anthropic>=0.45",
+    # Already installed transitively via mcp (id_token signature verification
+    # for the Entra ID OAuth flow); declared explicitly rather than relying
+    # on another package's internal dependency.
+    "pyjwt>=2.9",
+]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "moto[s3,secretsmanager]>=5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"

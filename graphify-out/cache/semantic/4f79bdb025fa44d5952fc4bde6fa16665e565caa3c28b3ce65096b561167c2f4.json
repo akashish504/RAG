@@ -1,0 +1,1 @@
+{"nodes": [{"id": "data_extract_airtable_connector", "label": "AirtableConnector", "file_type": "code", "source_file": "src/pipeline/airtable_ingestion/data_extract.py", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

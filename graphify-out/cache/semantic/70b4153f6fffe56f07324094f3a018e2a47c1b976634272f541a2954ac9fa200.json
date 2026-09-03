@@ -1,0 +1,1 @@
+{"nodes": [{"id": "mappings_opensearch_hybrid_index", "label": "OpenSearch mcp-docs hybrid BM25 + KNN index mapping", "file_type": "code", "source_file": "src/pipeline/embedding_pipeline/indexer/mappings.py", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}
